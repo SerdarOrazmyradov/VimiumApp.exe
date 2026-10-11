@@ -93,11 +93,27 @@ static void CollectHints() {
         VariantClear(&var);
     }
 
-    IUIAutomationCondition* pCondition = nullptr;
-    if (condCount > 0) {
-        g_pAutomation->CreateOrConditionFromArray(conds, condCount, &pCondition);
+        IUIAutomationCondition* pCondition = nullptr;
+    if (condCount == 1) {
+        // Only one condition; use it directly.
+        pCondition = conds[0];
+        conds[0]->AddRef();          // so the uniform Release loop below works
+    } else if (condCount > 1) {
+        // Fold pairwise: conds[0] OR conds[1] OR conds[2] ...
+        IUIAutomationCondition* pAccum = conds[0];
+        pAccum->AddRef();
+        for (int i = 1; i < condCount; ++i) {
+            IUIAutomationCondition* pNext = nullptr;
+            if (SUCCEEDED(g_pAutomation->CreateOrCondition(pAccum, conds[i], &pNext))) {
+                pAccum->Release();          // drop previous accumulated node
+                pAccum = pNext;
+            }
+            // On failure, keep the previous accumulator and move on.
+        }
+        pCondition = pAccum;
     }
-    // Release the individual conditions — the OR condition holds its own refs.
+
+    // Release our original references; the OR tree holds its own AddRef'd refs.
     for (int i = 0; i < condCount; ++i) conds[i]->Release();
 
     if (!pCondition) { pRoot->Release(); return; }
