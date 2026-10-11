@@ -1,0 +1,17 @@
+name: Build C++ App
+on: [push, pull_request]
+jobs:
+build:
+runs-on: windows-latest
+steps:
+- name: Checkout code
+uses: actions/checkout@v4
+- name: Setup MSVC
+uses: ilammy/msvc-dev-cmd@v1
+- name: Compile source
+run: cl.exe /EHsc /Fe:VimiumApp.exe main.cpp
+- name: Upload Artifact
+uses: actions/upload-artifact@v4
+with:
+name: VimiumApp
+path: VimiumApp.exe
