@@ -6,6 +6,8 @@
 #define _UNICODE
 
 #include <windows.h>
+#include <ole2.h>        
+#include <oleauto.h>
 #include <uiautomation.h>
 #include <vector>
 #include <string>
