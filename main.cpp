@@ -64,11 +64,7 @@ static void CollectHints() {
     IUIAutomationElement* pRoot = nullptr;
     if (FAILED(g_pAutomation->GetRootElement(&pRoot)) || !pRoot) return;
 
-    // Build condition: OR of interesting control types
-    IUIAutomationCondition* pCondition = nullptr;
-    IUIAutomationOrCondition* pOr = nullptr;
-    g_pAutomation->CreateOrCondition(&pOr);
-
+    // Build an array of per-control-type conditions, then OR them all at once.
     const CONTROLTYPEID types[] = {
         UIA_ButtonControlTypeId,
         UIA_HyperlinkControlTypeId,
@@ -82,17 +78,29 @@ static void CollectHints() {
         UIA_ComboBoxControlTypeId,
         UIA_SplitButtonControlTypeId,
     };
+    const int numTypes = (int)(sizeof(types) / sizeof(types[0]));
 
-    for (CONTROLTYPEID ct : types) {
+    IUIAutomationCondition* conds[numTypes] = {};
+    int condCount = 0;
+    for (int i = 0; i < numTypes; ++i) {
         VARIANT var; VariantInit(&var);
-        var.vt = VT_I4; var.lVal = ct;
+        var.vt = VT_I4; var.lVal = types[i];
         IUIAutomationCondition* pC = nullptr;
-        g_pAutomation->CreatePropertyCondition(UIA_ControlTypePropertyId, var, &pC);
-        if (pC) { pOr->AddCondition(pC); pC->Release(); }
+        if (SUCCEEDED(g_pAutomation->CreatePropertyCondition(
+                UIA_ControlTypePropertyId, var, &pC)) && pC) {
+            conds[condCount++] = pC;
+        }
         VariantClear(&var);
     }
-    pOr->QueryInterface(IID_PPV_ARGS(&pCondition));
-    pOr->Release();
+
+    IUIAutomationCondition* pCondition = nullptr;
+    if (condCount > 0) {
+        g_pAutomation->CreateOrConditionFromArray(conds, condCount, &pCondition);
+    }
+    // Release the individual conditions — the OR condition holds its own refs.
+    for (int i = 0; i < condCount; ++i) conds[i]->Release();
+
+    if (!pCondition) { pRoot->Release(); return; }
 
     IUIAutomationElementArray* pFound = nullptr;
     if (SUCCEEDED(pRoot->FindAll(TreeScope_Subtree, pCondition, &pFound)) && pFound) {
@@ -103,10 +111,12 @@ static void CollectHints() {
             IUIAutomationElement* pElem = nullptr;
             if (FAILED(pFound->GetElement(i, &pElem)) || !pElem) continue;
 
-            // Bounding rectangle
-            VARIANT vRect; VariantInit(&vRect);
+            // --- Bounding rectangle ---
             RECT rc = {};
-            if (SUCCEEDED(pElem->GetCurrentPropertyValue(UIA_BoundingRectanglePropertyId, &vRect)) && vRect.vt == (VT_ARRAY | VT_R8)) {
+            VARIANT vRect; VariantInit(&vRect);
+            if (SUCCEEDED(pElem->GetCurrentPropertyValue(
+                    UIA_BoundingRectanglePropertyId, &vRect)) &&
+                vRect.vt == (VT_ARRAY | VT_R8) && vRect.parray) {
                 double* pData = nullptr;
                 if (SUCCEEDED(SafeArrayAccessData(vRect.parray, (void**)&pData))) {
                     rc.left   = (LONG)pData[0];
@@ -118,10 +128,13 @@ static void CollectHints() {
             }
             VariantClear(&vRect);
 
-            // Clickable point
+            // --- Clickable point (two-argument form) ---
             POINT pt = {};
-            if (SUCCEEDED(pElem->GetClickablePoint(&pt)) && rc.right > rc.left && rc.bottom > rc.top) {
-                // Skip our own overlay
+            BOOL  gotPt = FALSE;
+            if (SUCCEEDED(pElem->GetClickablePoint(&pt, &gotPt)) && gotPt &&
+                rc.right > rc.left && rc.bottom > rc.top) {
+
+                // Skip our own overlay window
                 if (g_hOverlay) {
                     HWND hwndAt = WindowFromPoint(pt);
                     if (hwndAt == g_hOverlay) { pElem->Release(); continue; }
@@ -140,11 +153,10 @@ static void CollectHints() {
     pCondition->Release();
     pRoot->Release();
 
-    // Assign hint labels
+    // Assign fixed-length hint labels
     if (!g_hints.empty()) {
         int n = (int)g_hints.size();
-        int len = 1;
-        int capacity = 26;
+        int len = 1, capacity = 26;
         while (capacity < n) { ++len; capacity *= 26; }
         for (int i = 0; i < n; ++i)
             g_hints[i].label = MakeHint(i, len);
