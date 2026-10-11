@@ -18,9 +18,11 @@ jobs:
           /Fe:VimiumApp.exe
           main.cpp
           /link user32.lib gdi32.lib ole32.lib oleaut32.lib uiautomationcore.lib
+          /SUBSYSTEM:WINDOWS
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: VimiumApp
           path: VimiumApp.exe
+          if-no-files-found: error
